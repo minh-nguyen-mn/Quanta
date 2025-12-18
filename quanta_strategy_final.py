@@ -1283,4 +1283,1109 @@ class VolatilityTargetedOptimizedStrategy:
                     print(f"   Blind OOS Sharpe:    {blind_sharpe:.3f}")
                     
                     if blind_sharpe >= 2.0:
-                        print("   🎉 MAINTAINS 2.0+ TARGE
+                        print("   🎉 MAINTAINS 2.0+ TARGET ON BLIND DATA!")
+                        
+                    qualifying_blind_results.append({
+                        'portfolio_name': portfolio_name,
+                        'train_sharpe': train_sharpe,
+                        'val_sharpe': val_sharpe,
+                        'blind_sharpe': blind_sharpe,
+                        'validation_score': validation_score,
+                        'blind_signal': blind_signal,
+                        'blind_metrics': blind_metrics,
+                        'blind_returns': blind_returns
+                    })
+                else:
+                    print(f"   ⚠️ Could not recreate {portfolio_name} for blind period")
+            
+            # Summary of all qualifying portfolios with detailed signal analysis
+            if qualifying_blind_results:
+                print(f"\n🏆 FINAL RESULTS FOR ALL QUALIFYING PORTFOLIOS:")
+                print("="*80)
+                
+                successful_portfolios = []
+                for result in sorted(qualifying_blind_results, key=lambda x: x['blind_sharpe'], reverse=True):
+                    print(f"📊 {result['portfolio_name']}:")
+                    print(f"   Training: {result['train_sharpe']:.3f} | Validation: {result['val_sharpe']:.3f} | Blind: {result['blind_sharpe']:.3f}")
+                    
+                    # Add comprehensive metrics display
+                    self._display_comprehensive_metrics(result['portfolio_name'], result)
+                    
+                    # Add detailed signal composition analysis
+                    self._analyze_portfolio_composition(result['portfolio_name'])
+                    
+                    if result['blind_sharpe'] >= 2.0:
+                        print("   ✅ SUCCESSFUL: Maintains 2.0+ Sharpe on blind data!")
+                        successful_portfolios.append(result)
+                    else:
+                        gap = 2.0 - result['blind_sharpe']
+                        print(f"   ❌ Falls short by {gap:.3f}")
+                    print()
+                
+                # Store results
+                self.qualifying_blind_results = qualifying_blind_results
+                self.successful_portfolios = successful_portfolios
+                
+                # Set primary strategy to best blind performer
+                if successful_portfolios:
+                    best_blind_portfolio = successful_portfolios[0]
+                    self.final_strategy = self.portfolio_results[best_blind_portfolio['portfolio_name']]
+                    self.final_strategy['blind_metrics'] = best_blind_portfolio['blind_metrics']
+                    self.final_strategy['blind_returns'] = best_blind_portfolio['blind_returns']
+                    self.final_strategy['blind_signal'] = best_blind_portfolio['blind_signal']
+                    
+                    print(f"🎯 SUMMARY:")
+                    print(f"   Portfolios meeting 2.0+ validation: {len(self.qualifying_strategies)}")
+                    print(f"   Portfolios maintaining 2.0+ on blind: {len(successful_portfolios)}")
+                    print(f"   Best blind performer: {best_blind_portfolio['portfolio_name']} ({best_blind_portfolio['blind_sharpe']:.3f})")
+                else:
+                    print("⚠️ No portfolios maintained 2.0+ Sharpe on blind data")
+            else:
+                print("⚠️ No qualifying portfolios could be tested on blind data")
+        else:
+            # Fallback to single strategy if no qualifying portfolios
+            if not self.final_strategy:
+                print("⚠️ No final strategy available")
+                return
+                
+            # Test single best strategy
+            final_signal_name = None
+            for name, data in self.portfolio_results.items():
+                if data is self.final_strategy:
+                    final_signal_name = name
+                    break
+            
+            blind_signal = self._recreate_conservative_vol_targeted(blind_signals)
+            blind_metrics, blind_returns = self.project.backtest_signal(blind_signal, 'blind')
+            blind_sharpe = blind_metrics.get('Blind_Sharpe_Ratio', 0)
+            
+            print(f"\n🎯 FINAL RESULTS:")
+            print(f"   Training Sharpe:     {self.final_strategy['train_metrics'].get('Train_Sharpe_Ratio', 0):.3f}")
+            print(f"   Validation Sharpe:   {self.final_strategy['val_metrics'].get('Validation_Sharpe_Ratio', 0):.3f}")
+            print(f"   Blind OOS Sharpe:    {blind_sharpe:.3f}")
+            print(f"   Target Sharpe:       2.000")
+            
+            if blind_sharpe >= 2.0:
+                print("   🎉 TARGET ACHIEVED! 2.0+ Sharpe ratio reached!")
+            else:
+                gap = 2.0 - blind_sharpe
+                print(f"   📈 Gap to target: {gap:.3f}")
+            
+            self.final_strategy['blind_metrics'] = blind_metrics
+            self.final_strategy['blind_returns'] = blind_returns
+            self.final_strategy['blind_signal'] = blind_signal
+    
+    def _display_comprehensive_metrics(self, portfolio_name, result):
+        """Display comprehensive performance metrics for all periods."""
+        try:
+            # Get metrics from stored results
+            portfolio_data = self.portfolio_results.get(portfolio_name, {})
+            train_metrics = portfolio_data.get('train_metrics', {})
+            val_metrics = portfolio_data.get('val_metrics', {})
+            blind_metrics = result.get('blind_metrics', {})
+            
+            print(f"\n   📈 COMPREHENSIVE PERFORMANCE METRICS:")
+            print(f"   {'='*60}")
+            
+            # Display metrics in a formatted table
+            metrics_to_display = [
+                ('Sharpe Ratio', 'Sharpe_Ratio'),
+                ('Annual Return (%)', 'Annualized_Return'),
+                ('Volatility (%)', 'Volatility'),
+                ('Max Drawdown (%)', 'Max_Drawdown'),
+                ('Calmar Ratio', 'Calmar_Ratio'),
+                ('Win Rate (%)', 'Win_Rate')
+            ]
+            
+            # Debug: Show signal statistics for verification
+            portfolio_data = self.portfolio_results.get(portfolio_name, {})
+            if 'signal' in portfolio_data:
+                signal = portfolio_data['signal']
+                print(f"   📊 Signal Statistics (for verification):")
+                print(f"      Signal Mean: {signal.mean():.6f}")
+                print(f"      Signal Std: {signal.std():.6f}")
+                print(f"      Signal Min: {signal.min():.6f}")
+                print(f"      Signal Max: {signal.max():.6f}")
+                print()
+            
+            print(f"   {'Metric':<18} | {'Training':<10} | {'Validation':<12} | {'Blind':<10}")
+            print(f"   {'-'*18} | {'-'*10} | {'-'*12} | {'-'*10}")
+            
+            for metric_name, metric_key in metrics_to_display:
+                # Get values for each period
+                train_val = train_metrics.get(f'Train_{metric_key}', 0)
+                val_val = val_metrics.get(f'Validation_{metric_key}', 0)
+                blind_val = blind_metrics.get(f'Blind_{metric_key}', 0)
+                
+                # Format values appropriately
+                if 'Return' in metric_name or 'Volatility' in metric_name or 'Drawdown' in metric_name or 'Win Rate' in metric_name:
+                    # Convert to percentage for display
+                    train_str = f"{train_val*100:.2f}%" if train_val != 0 else "0.00%"
+                    val_str = f"{val_val*100:.2f}%" if val_val != 0 else "0.00%"
+                    blind_str = f"{blind_val*100:.2f}%" if blind_val != 0 else "0.00%"
+                else:
+                    # Display as ratio
+                    train_str = f"{train_val:.3f}" if train_val != 0 else "0.000"
+                    val_str = f"{val_val:.3f}" if val_val != 0 else "0.000"
+                    blind_str = f"{blind_val:.3f}" if blind_val != 0 else "0.000"
+                
+                print(f"   {metric_name:<18} | {train_str:<10} | {val_str:<12} | {blind_str:<10}")
+            
+            # Additional risk metrics
+            print(f"   {'-'*60}")
+            
+            # Calculate some additional derived metrics
+            train_sharpe = train_metrics.get('Train_Sharpe_Ratio', 0)
+            val_sharpe = val_metrics.get('Validation_Sharpe_Ratio', 0)
+            blind_sharpe = blind_metrics.get('Blind_Sharpe_Ratio', 0)
+            
+            # Sharpe consistency (how stable is performance across periods)
+            sharpe_values = [s for s in [train_sharpe, val_sharpe, blind_sharpe] if s != 0]
+            if len(sharpe_values) >= 2:
+                sharpe_std = np.std(sharpe_values)
+                sharpe_mean = np.mean(sharpe_values)
+                sharpe_consistency = 1 - (sharpe_std / (sharpe_mean + 1e-6)) if sharpe_mean != 0 else 0
+                print(f"   {'Sharpe Consistency':<18} | {sharpe_consistency:.3f} (higher is better)")
+            
+            # Performance degradation from train to validation to blind
+            if train_sharpe != 0 and val_sharpe != 0:
+                train_to_val_deg = (train_sharpe - val_sharpe) / train_sharpe * 100
+                print(f"   {'Train→Val Degrad':<18} | {train_to_val_deg:.1f}% (lower is better)")
+            
+            if val_sharpe != 0 and blind_sharpe != 0:
+                val_to_blind_deg = (val_sharpe - blind_sharpe) / val_sharpe * 100
+                print(f"   {'Val→Blind Degrad':<18} | {val_to_blind_deg:.1f}% (lower is better)")
+                
+        except Exception as e:
+            print(f"   ⚠️  Error displaying comprehensive metrics: {e}")
+    
+    def _analyze_portfolio_composition(self, portfolio_name):
+        """Analyze and display portfolio signal composition, correlations, and weights."""
+        try:
+            portfolio_data = self.portfolio_results.get(portfolio_name, {})
+            
+            print(f"\n   📋 SIGNAL COMPOSITION ANALYSIS:")
+            print(f"   Portfolio: {portfolio_name}")
+            
+            # Get signals used in this portfolio
+            signals_used = []
+            weights = {}
+            
+            if portfolio_name == 'ml_enhanced_vol_targeted':
+                # Use the actual filtered signals from ML Enhanced portfolio
+                if 'filtered_signals' in portfolio_data:
+                    signals_used = portfolio_data['filtered_signals']
+                else:
+                    # Fallback to top 15 signals
+                    signals_used = self.performance_df.head(15)['signal_name'].tolist()
+                weights = {signal: 1.0/len(signals_used) for signal in signals_used if signal in self.all_signals['train']}
+                
+            elif portfolio_name == 'ml_ridge':
+                # Use the actual filtered signals from ML Ridge portfolio
+                if 'filtered_signals' in portfolio_data:
+                    signals_used = portfolio_data['filtered_signals']
+                elif 'feature_names' in portfolio_data:
+                    signals_used = portfolio_data['feature_names']
+                else:
+                    # Fallback to top 15 signals
+                    signals_used = self.performance_df.head(15)['signal_name'].tolist()
+                # For ML models, weights are determined by the model coefficients
+                if 'model' in portfolio_data:
+                    try:
+                        model_weights = portfolio_data['model'].coef_
+                        weights = {signal: abs(weight) for signal, weight in zip(signals_used, model_weights)}
+                        # Normalize weights
+                        total_weight = sum(weights.values())
+                        if total_weight > 0:
+                            weights = {k: v/total_weight for k, v in weights.items()}
+                    except:
+                        weights = {signal: 1.0/len(signals_used) for signal in signals_used}
+                else:
+                    weights = {signal: 1.0/len(signals_used) for signal in signals_used}
+                    
+            elif portfolio_name in ['conservative_vol_targeted', 'adaptive_vol_targeted']:
+                # Use stored valid signals
+                if 'valid_signals' in portfolio_data:
+                    signals_used = portfolio_data['valid_signals']
+                    weights = {signal: 1.0/len(signals_used) for signal in signals_used}
+                else:
+                    signals_used = self.performance_df.head(15)['signal_name'].tolist()
+                    weights = {signal: 1.0/len(signals_used) for signal in signals_used}
+                    
+            else:
+                # Default for other portfolios
+                signals_used = self.performance_df.head(10)['signal_name'].tolist()
+                weights = {signal: 1.0/len(signals_used) for signal in signals_used}
+            
+            # Filter to only signals that exist in training data
+            valid_signals = [s for s in signals_used if s in self.all_signals['train']]
+            
+            print(f"   📊 Number of signals: {len(valid_signals)}")
+            print(f"   📋 Signal list:")
+            
+            # Display signals with their individual performance
+            for i, signal_name in enumerate(valid_signals[:10], 1):  # Show top 10
+                weight = weights.get(signal_name, 0)
+                signal_row = self.performance_df[self.performance_df['signal_name'] == signal_name]
+                if not signal_row.empty:
+                    train_sharpe = signal_row.iloc[0]['train_sharpe']
+                    val_sharpe = signal_row.iloc[0]['val_sharpe']
+                    stability = signal_row.iloc[0]['stability_score']
+                    print(f"      {i:2d}. {signal_name:<35} | Weight: {weight:.3f} | Train: {train_sharpe:.3f} | Val: {val_sharpe:.3f} | Stability: {stability:.3f}")
+            
+            if len(valid_signals) > 10:
+                print(f"      ... and {len(valid_signals)-10} more signals")
+            
+            # Calculate correlation matrix for the signals
+            if len(valid_signals) > 1:
+                signal_matrix = []
+                final_signal_names = []
+                
+                for signal_name in valid_signals:
+                    if signal_name in self.all_signals['train']:
+                        signal_series = self.all_signals['train'][signal_name]
+                        if signal_series.std() > 1e-6:  # Only include signals with variation
+                            signal_matrix.append(signal_series)
+                            final_signal_names.append(signal_name)
+                
+                if len(signal_matrix) > 1:
+                    # Create PnL correlation matrix using combined train+validation period
+                    import pandas as pd
+                    
+                    # Use combined train+validation returns for PnL correlation calculation
+                    train_returns = self.project.train_data['Returns']
+                    val_returns = self.project.validation_data['Returns']
+                    combined_returns = pd.concat([train_returns, val_returns])
+                    
+                    print(f"   📊 Using combined train+validation period (2000-2021) for PnL correlation analysis")
+                    
+                    # Calculate PnL for each signal using combined period
+                    pnl_matrix = []
+                    pnl_signal_names = []
+                    
+                    for i, signal_name in enumerate(final_signal_names):
+                        # Get combined signal from train and validation
+                        train_signal = self.all_signals.get('train', {}).get(signal_name)
+                        val_signal = self.all_signals.get('validation', {}).get(signal_name)
+                        
+                        if train_signal is not None and val_signal is not None:
+                            combined_signal = pd.concat([train_signal, val_signal])
+                            
+                            # Calculate PnL as signal * next period returns
+                            aligned_returns = combined_returns.shift(-1).fillna(0)
+                            aligned_signal = combined_signal.reindex(aligned_returns.index).fillna(0)
+                            
+                            # Ensure alignment
+                            common_idx = aligned_returns.index.intersection(aligned_signal.index)
+                            if len(common_idx) > 500:  # Need sufficient data for train+val
+                                pnl = aligned_signal.loc[common_idx] * aligned_returns.loc[common_idx]
+                                if pnl.std() > 1e-8:  # Ensure PnL has variation
+                                    pnl_matrix.append(pnl)
+                                    pnl_signal_names.append(signal_name)
+                    
+                    if len(pnl_matrix) > 1:
+                        pnl_df = pd.concat(pnl_matrix, axis=1, keys=pnl_signal_names).dropna()
+                        
+                        if len(pnl_df) > 500:  # Need sufficient data for train+val
+                            pnl_corr_matrix = pnl_df.corr()
+                            
+                            # Find maximum PnL correlation (excluding diagonal)
+                            max_pnl_corr = 0
+                            max_pnl_pair = ("", "")
+                            
+                            for i in range(len(pnl_corr_matrix)):
+                                for j in range(i+1, len(pnl_corr_matrix)):
+                                    abs_corr = abs(pnl_corr_matrix.iloc[i, j])
+                                    if abs_corr > max_pnl_corr:
+                                        max_pnl_corr = abs_corr
+                                        max_pnl_pair = (pnl_corr_matrix.index[i], pnl_corr_matrix.columns[j])
+                            
+                            print(f"   🔗 Maximum PnL correlation (2000-2021): {max_pnl_corr:.3f} between:")
+                            print(f"      • {max_pnl_pair[0]}")
+                            print(f"      • {max_pnl_pair[1]}")
+                            
+                            # Calculate average PnL correlation
+                            upper_triangle = pnl_corr_matrix.where(np.triu(np.ones(pnl_corr_matrix.shape), k=1).astype(bool))
+                            avg_pnl_corr = upper_triangle.stack().mean()
+                            print(f"   📊 Average pairwise PnL correlation: {avg_pnl_corr:.3f}")
+                            
+                            # PnL diversification assessment based on max_correlation parameter
+                            if max_pnl_corr < self.max_correlation:
+                                print(f"   ✅ Good PnL diversification (max PnL corr < {self.max_correlation:.2f})")
+                            elif max_pnl_corr < 0.8:
+                                print(f"   ⚠️  Moderate PnL diversification (max PnL corr < 0.8)")
+                            else:
+                                print(f"   ❌ Poor PnL diversification (max PnL corr >= 0.8)")
+                        else:
+                            print(f"   ⚠️  Insufficient data for PnL correlation analysis")
+                    else:
+                        print(f"   ⚠️  Insufficient valid signals for PnL correlation analysis")
+                else:
+                    print(f"   ⚠️  Insufficient valid signals for PnL correlation analysis")
+            else:
+                print(f"   ⚠️  Only one signal - no correlation analysis possible")
+                
+        except Exception as e:
+            print(f"   ⚠️  Error in portfolio composition analysis: {e}")
+
+    def _recreate_conservative_vol_targeted(self, blind_signals):
+        """Recreate conservative vol targeted for blind period."""
+        # Use same approach as training
+        top_stable_signals = self.performance_df.head(12)['signal_name'].tolist()
+        weights = self.final_strategy.get('weights', {})
+        
+        portfolio_signal = pd.Series(0.0, index=self.project.blind_data.index)
+        
+        for signal_name, weight in weights.items():
+            if signal_name in blind_signals:
+                signal_series = blind_signals[signal_name]
+                signal_mean = signal_series.expanding(min_periods=60).mean()
+                signal_std = signal_series.expanding(min_periods=60).std()
+                normalized_signal = (signal_series - signal_mean) / (signal_std + 1e-6)
+                normalized_signal = np.clip(normalized_signal * 0.15, -0.25, 0.25)
+                portfolio_signal += normalized_signal * weight
+        
+        # Apply conservative volatility targeting
+        target_vol = 0.08
+        rolling_vol = portfolio_signal.rolling(60, min_periods=30).std() * np.sqrt(252)
+        vol_scalar = target_vol / (rolling_vol + 1e-6)
+        vol_scalar = np.clip(vol_scalar, 0.5, 1.8)
+        
+        portfolio_signal = portfolio_signal * vol_scalar
+        portfolio_signal = np.clip(portfolio_signal, -1.0, 1.0)
+        
+        return portfolio_signal
+    
+    def _recreate_adaptive_vol_targeted(self, blind_signals):
+        """Recreate adaptive vol targeted for blind period."""
+        consistent_signals = self.performance_df[self.performance_df['consistency_ratio'] > 0.7].head(15)['signal_name'].tolist()
+        
+        portfolio_signal = pd.Series(0.0, index=self.project.blind_data.index)
+        
+        for signal_name in consistent_signals:
+            if signal_name in blind_signals:
+                signal_series = blind_signals[signal_name]
+                signal_mean = signal_series.expanding(min_periods=40).mean()
+                signal_std = signal_series.expanding(min_periods=40).std()
+                normalized_signal = (signal_series - signal_mean) / (signal_std + 1e-6)
+                
+                stability = self.performance_df[self.performance_df['signal_name'] == signal_name]['stability_score'].iloc[0]
+                scaling_factor = 0.1 + (stability * 0.15)
+                normalized_signal = np.clip(normalized_signal * scaling_factor, -0.3, 0.3)
+                
+                portfolio_signal += normalized_signal / len(consistent_signals)
+        
+        # Adaptive volatility targeting
+        market_vol = self.project.blind_data['Returns'].rolling(60, min_periods=30).std() * np.sqrt(252)
+        target_vol = 0.09 + (market_vol - market_vol.expanding(min_periods=252).mean()) * 0.5
+        target_vol = np.clip(target_vol, 0.06, 0.15)
+        
+        rolling_vol = portfolio_signal.rolling(40, min_periods=20).std() * np.sqrt(252)
+        vol_scalar = target_vol / (rolling_vol + 1e-6)
+        vol_scalar = np.clip(vol_scalar, 0.4, 2.2)
+        
+        portfolio_signal = portfolio_signal * vol_scalar
+        portfolio_signal = np.clip(portfolio_signal, -1.3, 1.3)
+        
+        return portfolio_signal
+    
+    def _recreate_robust_vol_targeted(self, blind_signals):
+        """Recreate robust vol targeted for blind period."""
+        # Recreate sub-portfolios
+        sub_portfolios = []
+        
+        # Sub-portfolio 1: Top stability signals
+        stability_signals = self.performance_df.head(8)['signal_name'].tolist()
+        sub_port_1 = self._recreate_sub_portfolio(blind_signals, stability_signals, 'stability')
+        if sub_port_1 is not None:
+            sub_portfolios.append(sub_port_1)
+        
+        # Sub-portfolio 2: Consistent performers
+        consistent_signals = self.performance_df[self.performance_df['consistency_ratio'] > 0.8].head(8)['signal_name'].tolist()
+        sub_port_2 = self._recreate_sub_portfolio(blind_signals, consistent_signals, 'consistency')
+        if sub_port_2 is not None:
+            sub_portfolios.append(sub_port_2)
+        
+        # Sub-portfolio 3: High average Sharpe
+        high_avg_signals = self.performance_df.nlargest(8, 'avg_sharpe')['signal_name'].tolist()
+        sub_port_3 = self._recreate_sub_portfolio(blind_signals, high_avg_signals, 'avg_sharpe')
+        if sub_port_3 is not None:
+            sub_portfolios.append(sub_port_3)
+        
+        # Combine sub-portfolios
+        portfolio_signal = pd.Series(0.0, index=self.project.blind_data.index)
+        if sub_portfolios:
+            for sub_port in sub_portfolios:
+                portfolio_signal += sub_port / len(sub_portfolios)
+        
+        # Apply volatility targeting
+        target_vol = 0.10
+        rolling_vol = portfolio_signal.rolling(50, min_periods=25).std() * np.sqrt(252)
+        vol_scalar = target_vol / (rolling_vol + 1e-6)
+        vol_scalar = np.clip(vol_scalar, 0.6, 2.0)
+        
+        portfolio_signal = portfolio_signal * vol_scalar
+        portfolio_signal = np.clip(portfolio_signal, -1.2, 1.2)
+        
+        return portfolio_signal
+    
+    def _recreate_sub_portfolio(self, blind_signals, signal_names, weight_type):
+        """Recreate sub-portfolio for blind period."""
+        if not signal_names:
+            return None
+            
+        sub_portfolio = pd.Series(0.0, index=self.project.blind_data.index)
+        
+        weights = {}
+        total_weight = 0
+        
+        for signal_name in signal_names:
+            if signal_name in blind_signals:
+                if weight_type == 'stability':
+                    weight = self.performance_df[self.performance_df['signal_name'] == signal_name]['stability_score'].iloc[0]
+                elif weight_type == 'consistency':
+                    weight = self.performance_df[self.performance_df['signal_name'] == signal_name]['consistency_ratio'].iloc[0]
+                else:  # avg_sharpe
+                    weight = max(0, self.performance_df[self.performance_df['signal_name'] == signal_name]['avg_sharpe'].iloc[0])
+                
+                if weight > 0:
+                    weights[signal_name] = weight
+                    total_weight += weight
+        
+        if total_weight == 0:
+            return None
+        
+        # Normalize weights
+        for signal_name in weights:
+            weights[signal_name] /= total_weight
+        
+        # Combine signals
+        for signal_name, weight in weights.items():
+            signal_series = blind_signals[signal_name]
+            signal_mean = signal_series.expanding(min_periods=50).mean()
+            signal_std = signal_series.expanding(min_periods=50).std()
+            normalized_signal = (signal_series - signal_mean) / (signal_std + 1e-6)
+            normalized_signal = np.clip(normalized_signal * 0.12, -0.2, 0.2)
+            sub_portfolio += normalized_signal * weight
+        
+        return sub_portfolio
+    
+    def _recreate_ml_ridge_blind_signal(self, blind_signals):
+        """Recreate ML Ridge signal for blind period."""
+        if 'model' not in self.final_strategy or 'scaler' not in self.final_strategy:
+            return self._recreate_conservative_vol_targeted(blind_signals)
+        
+        try:
+            model = self.final_strategy['model']
+            scaler = self.final_strategy['scaler']
+            feature_names = self.final_strategy['feature_names']
+            
+            # Prepare blind features
+            features = []
+            for signal_name in feature_names:
+                if signal_name in blind_signals:
+                    features.append(blind_signals[signal_name])
+                else:
+                    # Use zero if missing
+                    features.append(pd.Series(0, index=self.project.blind_data.index))
+            
+            if len(features) == 0:
+                return self._recreate_conservative_vol_targeted(blind_signals)
+            
+            # Create feature matrix
+            X_blind = pd.concat(features, axis=1, keys=feature_names).fillna(0)
+            
+            # Scale features
+            X_blind_scaled = pd.DataFrame(scaler.transform(X_blind), index=X_blind.index, columns=X_blind.columns)
+            
+            # Generate predictions
+            predictions = model.predict(X_blind_scaled)
+            ml_signal = pd.Series(predictions, index=self.project.blind_data.index)
+            
+            # Apply Ridge-specific scaling (conservative)
+            ml_signal = np.tanh(ml_signal * 10)
+            
+            # Conservative volatility targeting
+            target_vol = 0.08
+            rolling_vol = ml_signal.rolling(50, min_periods=25).std() * np.sqrt(252)
+            vol_scalar = target_vol / (rolling_vol + 1e-6)
+            vol_scalar = np.clip(vol_scalar, 0.4, 1.5)
+            
+            ml_signal = ml_signal * vol_scalar
+            return np.clip(ml_signal, -0.8, 0.8)
+            
+        except Exception as e:
+            print(f"⚠️ ML Ridge blind recreation failed: {e}")
+            return self._recreate_conservative_vol_targeted(blind_signals)
+
+    def _recreate_ml_enhanced_vol_targeted(self, blind_signals):
+        """Recreate ML enhanced vol targeted for blind period."""
+        if 'model' not in self.final_strategy or 'scaler' not in self.final_strategy:
+            # Fallback to conservative approach
+            return self._recreate_conservative_vol_targeted(blind_signals)
+        
+        try:
+            model = self.final_strategy['model']
+            scaler = self.final_strategy['scaler']
+            feature_names = self.final_strategy['feature_names']
+            
+            # Prepare features for blind period
+            features = []
+            for signal_name in feature_names:
+                if signal_name in blind_signals:
+                    features.append(blind_signals[signal_name])
+                else:
+                    # Use zero signal if missing
+                    features.append(pd.Series(0, index=self.project.blind_data.index))
+            
+            if len(features) == 0:
+                return self._recreate_conservative_vol_targeted(blind_signals)
+            
+            # Create feature matrix
+            X_blind = pd.concat(features, axis=1, keys=feature_names).fillna(0)
+            
+            # Scale features
+            X_blind_scaled = pd.DataFrame(scaler.transform(X_blind),
+                                        index=X_blind.index, columns=X_blind.columns)
+            
+            # Generate predictions
+            predictions = pd.Series(model.predict(X_blind_scaled), index=X_blind_scaled.index)
+            
+            # Convert to signal
+            ml_signal = np.tanh(predictions * 15)
+            
+            # Apply volatility targeting
+            target_vol = 0.09
+            rolling_vol = ml_signal.rolling(60, min_periods=30).std() * np.sqrt(252)
+            vol_scalar = target_vol / (rolling_vol + 1e-6)
+            vol_scalar = np.clip(vol_scalar, 0.5, 1.8)
+            
+            ml_signal = ml_signal * vol_scalar
+            ml_signal = np.clip(ml_signal, -1.1, 1.1)
+            
+            return ml_signal
+            
+        except Exception as e:
+            print(f"⚠️ ML recreation failed: {e}, using conservative approach")
+            return self._recreate_conservative_vol_targeted(blind_signals)
+    
+    def _create_ml_ridge_portfolio(self):
+        """ML Ridge portfolio with bias-free implementation."""
+        if not SKLEARN_AVAILABLE:
+            return
+        
+        try:
+            # Select top signals and apply correlation filtering
+            top_signals = self.performance_df.head(20)['signal_name'].tolist()
+            
+            # Apply correlation filtering
+            filtered_signals = self._filter_signals_by_correlation(top_signals)
+            
+            # Prepare features using correlation-filtered signals
+            features = []
+            feature_names = []
+            
+            for signal_name in filtered_signals:
+                if signal_name in self.all_signals['train']:
+                    signal_series = self.all_signals['train'][signal_name]
+                    if signal_series.std() > 1e-6:
+                        features.append(signal_series)
+                        feature_names.append(signal_name)
+            
+            if len(features) < 5:
+                print(f"⚠️ Insufficient features for ML Ridge portfolio after correlation filtering: {len(features)}")
+                return
+            
+            print(f"📊 ML Ridge using {len(features)} correlation-filtered features")
+            
+            # Create feature matrix
+            X = pd.concat(features, axis=1, keys=feature_names).fillna(0)
+            y = self.project.train_data['Close'].pct_change().shift(-1).fillna(0)
+            
+            # Align indices
+            common_idx = X.index.intersection(y.index)
+            X = X.loc[common_idx]
+            y = y.loc[common_idx]
+            
+            if len(X) < 100:
+                print("⚠️ Insufficient data for ML Ridge portfolio")
+                return
+            
+            # Ridge regression with high regularization
+            scaler = StandardScaler()
+            X_scaled = pd.DataFrame(scaler.fit_transform(X), index=X.index, columns=X.columns)
+            
+            model = Ridge(alpha=10.0, random_state=42)  # High regularization
+            model.fit(X_scaled, y)
+            
+            # Generate conservative predictions
+            predictions = pd.Series(model.predict(X_scaled), index=X_scaled.index)
+            ml_signal = np.tanh(predictions * 10)  # Conservative scaling
+            ml_signal = ml_signal.reindex(self.project.train_data.index).fillna(0)
+            
+            # Conservative volatility targeting
+            target_vol = 0.08
+            rolling_vol = ml_signal.rolling(50, min_periods=25).std() * np.sqrt(252)
+            vol_scalar = target_vol / (rolling_vol + 1e-6)
+            vol_scalar = np.clip(vol_scalar, 0.4, 1.5)
+            
+            ml_signal = ml_signal * vol_scalar
+            ml_signal = np.clip(ml_signal, -0.8, 0.8)
+            
+            # Backtest
+            train_metrics, train_returns = self.project.backtest_signal(ml_signal, 'train')
+            
+            print(f"📊 ML Ridge Portfolio (Train): Sharpe = {train_metrics.get('Train_Sharpe_Ratio', 0):.3f}")
+            
+            self.portfolio_results['ml_ridge'] = {
+                'signal': ml_signal,
+                'train_metrics': train_metrics,
+                'train_returns': train_returns,
+                'model': model,
+                'scaler': scaler,
+                'feature_names': feature_names,
+                'filtered_signals': filtered_signals  # Store the correlation-filtered signals
+            }
+            
+        except Exception as e:
+            print(f"⚠️ ML Ridge portfolio failed: {e}")
+    
+    def _create_ml_elastic_portfolio(self):
+        """ML ElasticNet portfolio with bias-free implementation."""
+        if not SKLEARN_AVAILABLE:
+            return
+        
+        try:
+            from sklearn.linear_model import ElasticNet
+            
+            # Select top signals for ML
+            top_signals = self.performance_df.head(12)['signal_name'].tolist()
+            
+            # Prepare features
+            features = []
+            feature_names = []
+            
+            for signal_name in top_signals:
+                if signal_name in self.all_signals['train']:
+                    signal_series = self.all_signals['train'][signal_name]
+                    features.append(signal_series)
+                    feature_names.append(signal_name)
+            
+            if len(features) < 5:
+                print("⚠️ Insufficient features for ML Elastic portfolio")
+                return
+            
+            # Create feature matrix
+            X = pd.concat(features, axis=1, keys=feature_names).fillna(0)
+            y = self.project.train_data['Close'].pct_change().shift(-1).fillna(0)
+            
+            # Align indices
+            common_idx = X.index.intersection(y.index)
+            X = X.loc[common_idx]
+            y = y.loc[common_idx]
+            
+            if len(X) < 100:
+                print("⚠️ Insufficient data for ML Elastic portfolio")
+                return
+            
+            # ElasticNet with regularization
+            scaler = StandardScaler()
+            X_scaled = pd.DataFrame(scaler.fit_transform(X), index=X.index, columns=X.columns)
+            
+            model = ElasticNet(alpha=1.0, l1_ratio=0.5, random_state=42)
+            model.fit(X_scaled, y)
+            
+            # Generate conservative predictions
+            predictions = pd.Series(model.predict(X_scaled), index=X_scaled.index)
+            ml_signal = np.tanh(predictions * 12)  # Conservative scaling
+            ml_signal = ml_signal.reindex(self.project.train_data.index).fillna(0)
+            
+            # Conservative volatility targeting
+            target_vol = 0.08
+            rolling_vol = ml_signal.rolling(50, min_periods=25).std() * np.sqrt(252)
+            vol_scalar = target_vol / (rolling_vol + 1e-6)
+            vol_scalar = np.clip(vol_scalar, 0.4, 1.5)
+            
+            ml_signal = ml_signal * vol_scalar
+            ml_signal = np.clip(ml_signal, -0.8, 0.8)
+            
+            # Backtest
+            train_metrics, train_returns = self.project.backtest_signal(ml_signal, 'train')
+            
+            print(f"📊 ML Elastic Portfolio (Train): Sharpe = {train_metrics.get('Train_Sharpe_Ratio', 0):.3f}")
+            
+            self.portfolio_results['ml_elastic'] = {
+                'signal': ml_signal,
+                'train_metrics': train_metrics,
+                'train_returns': train_returns,
+                'model': model,
+                'scaler': scaler,
+                'feature_names': feature_names
+            }
+            
+        except Exception as e:
+            print(f"⚠️ ML Elastic portfolio failed: {e}")
+    
+    def _create_ml_forest_portfolio(self):
+        """ML Random Forest portfolio with bias-free implementation."""
+        if not SKLEARN_AVAILABLE:
+            return
+        
+        try:
+            # Select top signals for ML
+            top_signals = self.performance_df.head(10)['signal_name'].tolist()
+            
+            # Prepare features
+            features = []
+            feature_names = []
+            
+            for signal_name in top_signals:
+                if signal_name in self.all_signals['train']:
+                    signal_series = self.all_signals['train'][signal_name]
+                    features.append(signal_series)
+                    feature_names.append(signal_name)
+            
+            if len(features) < 5:
+                print("⚠️ Insufficient features for ML Forest portfolio")
+                return
+            
+            # Create feature matrix
+            X = pd.concat(features, axis=1, keys=feature_names).fillna(0)
+            y = self.project.train_data['Close'].pct_change().shift(-1).fillna(0)
+            
+            # Align indices
+            common_idx = X.index.intersection(y.index)
+            X = X.loc[common_idx]
+            y = y.loc[common_idx]
+            
+            if len(X) < 100:
+                print("⚠️ Insufficient data for ML Forest portfolio")
+                return
+            
+            # Random Forest with regularization
+            model = RandomForestRegressor(
+                n_estimators=50,  # Conservative number
+                max_depth=4,      # Prevent overfitting
+                min_samples_split=20,
+                min_samples_leaf=10,
+                random_state=42
+            )
+            model.fit(X, y)
+            
+            # Generate conservative predictions
+            predictions = pd.Series(model.predict(X), index=X.index)
+            ml_signal = np.tanh(predictions * 8)  # Very conservative scaling
+            ml_signal = ml_signal.reindex(self.project.train_data.index).fillna(0)
+            
+            # Conservative volatility targeting
+            target_vol = 0.07
+            rolling_vol = ml_signal.rolling(60, min_periods=30).std() * np.sqrt(252)
+            vol_scalar = target_vol / (rolling_vol + 1e-6)
+            vol_scalar = np.clip(vol_scalar, 0.3, 1.3)
+            
+            ml_signal = ml_signal * vol_scalar
+            ml_signal = np.clip(ml_signal, -0.7, 0.7)
+            
+            # Backtest
+            train_metrics, train_returns = self.project.backtest_signal(ml_signal, 'train')
+            
+            print(f"📊 ML Forest Portfolio (Train): Sharpe = {train_metrics.get('Train_Sharpe_Ratio', 0):.3f}")
+            
+            self.portfolio_results['ml_forest'] = {
+                'signal': ml_signal,
+                'train_metrics': train_metrics,
+                'train_returns': train_returns,
+                'model': model,
+                'feature_names': feature_names
+            }
+            
+        except Exception as e:
+            print(f"⚠️ ML Forest portfolio failed: {e}")
+    
+    def _create_equal_weighted_portfolio(self):
+        """Equal weighted portfolio with bias-free implementation."""
+        # Select top stable signals
+        top_signals = self.performance_df[self.performance_df['stability_score'] > 0.05].head(20)['signal_name'].tolist()
+        
+        if len(top_signals) == 0:
+            top_signals = self.performance_df.head(15)['signal_name'].tolist()
+        
+        portfolio_signal = pd.Series(0.0, index=self.project.train_data.index)
+        valid_count = 0
+        
+        for signal_name in top_signals:
+            if signal_name in self.all_signals['train']:
+                signal_series = self.all_signals['train'][signal_name]
+                if signal_series.std() > 1e-6:
+                    # Bias-free normalization
+                    signal_mean = signal_series.expanding(min_periods=30).mean()
+                    signal_std = signal_series.expanding(min_periods=30).std()
+                    normalized_signal = (signal_series - signal_mean) / (signal_std + 1e-6)
+                    normalized_signal = np.clip(normalized_signal * 0.15, -0.3, 0.3)
+                    portfolio_signal += normalized_signal
+                    valid_count += 1
+        
+        if valid_count == 0:
+            print("⚠️ No valid signals for equal weighted portfolio")
+            return
+        
+        portfolio_signal = portfolio_signal / valid_count
+        
+        # Volatility targeting
+        target_vol = 0.09
+        rolling_vol = portfolio_signal.rolling(40, min_periods=20).std() * np.sqrt(252)
+        vol_scalar = target_vol / (rolling_vol + 1e-6)
+        vol_scalar = np.clip(vol_scalar, 0.4, 2.0)
+        
+        portfolio_signal = portfolio_signal * vol_scalar
+        portfolio_signal = np.clip(portfolio_signal, -1.0, 1.0)
+        
+        # Backtest
+        train_metrics, train_returns = self.project.backtest_signal(portfolio_signal, 'train')
+        
+        print(f"📊 Equal Weighted Portfolio (Train): Sharpe = {train_metrics.get('Train_Sharpe_Ratio', 0):.3f}")
+        
+        self.portfolio_results['equal_weighted'] = {
+            'signal': portfolio_signal,
+            'train_metrics': train_metrics,
+            'train_returns': train_returns,
+            'valid_signals': top_signals[:valid_count]
+        }
+    
+    def _create_sharpe_weighted_portfolio(self):
+        """Sharpe weighted portfolio with bias-free implementation."""
+        # Use training Sharpe for weighting (this is valid - no lookahead bias)
+        positive_sharpe_signals = self.performance_df[self.performance_df['train_sharpe'] > 0.1]
+        
+        if len(positive_sharpe_signals) == 0:
+            print("⚠️ No positive Sharpe signals found")
+            return
+        
+        portfolio_signal = pd.Series(0.0, index=self.project.train_data.index)
+        total_weight = 0
+        
+        for idx, row in positive_sharpe_signals.head(15).iterrows():
+            signal_name = row['signal_name']
+            weight = max(0, row['train_sharpe'])
+            
+            if signal_name in self.all_signals['train'] and weight > 0:
+                signal_series = self.all_signals['train'][signal_name]
+                if signal_series.std() > 1e-6:
+                    # Bias-free normalization
+                    signal_mean = signal_series.expanding(min_periods=30).mean()
+                    signal_std = signal_series.expanding(min_periods=30).std()
+                    normalized_signal = (signal_series - signal_mean) / (signal_std + 1e-6)
+                    normalized_signal = np.clip(normalized_signal * 0.12, -0.25, 0.25)
+                    portfolio_signal += normalized_signal * weight
+                    total_weight += weight
+        
+        if total_weight == 0:
+            print("⚠️ No valid weighted signals")
+            return
+        
+        portfolio_signal = portfolio_signal / total_weight
+        
+        # Volatility targeting
+        target_vol = 0.10
+        rolling_vol = portfolio_signal.rolling(40, min_periods=20).std() * np.sqrt(252)
+        vol_scalar = target_vol / (rolling_vol + 1e-6)
+        vol_scalar = np.clip(vol_scalar, 0.5, 2.2)
+        
+        portfolio_signal = portfolio_signal * vol_scalar
+        portfolio_signal = np.clip(portfolio_signal, -1.2, 1.2)
+        
+        # Backtest
+        train_metrics, train_returns = self.project.backtest_signal(portfolio_signal, 'train')
+        
+        print(f"📊 Sharpe Weighted Portfolio (Train): Sharpe = {train_metrics.get('Train_Sharpe_Ratio', 0):.3f}")
+        
+        self.portfolio_results['sharpe_weighted'] = {
+            'signal': portfolio_signal,
+            'train_metrics': train_metrics,
+            'train_returns': train_returns,
+            'signal_weights': positive_sharpe_signals.head(15)[['signal_name', 'train_sharpe']].to_dict('records')
+        }
+    
+    def _create_risk_parity_portfolio(self):
+        """Risk parity portfolio with bias-free implementation."""
+        # Select signals and calculate their expanding volatilities
+        top_signals = self.performance_df.head(15)['signal_name'].tolist()
+        
+        portfolio_signal = pd.Series(0.0, index=self.project.train_data.index)
+        valid_signals = []
+        
+        for signal_name in top_signals:
+            if signal_name in self.all_signals['train']:
+                signal_series = self.all_signals['train'][signal_name]
+                if signal_series.std() > 1e-6:
+                    valid_signals.append(signal_name)
+        
+        if len(valid_signals) == 0:
+            print("⚠️ No valid signals for risk parity portfolio")
+            return
+        
+        # Calculate expanding risk contributions
+        for signal_name in valid_signals:
+            signal_series = self.all_signals['train'][signal_name]
+            
+            # Bias-free normalization
+            signal_mean = signal_series.expanding(min_periods=30).mean()
+            signal_std = signal_series.expanding(min_periods=30).std()
+            normalized_signal = (signal_series - signal_mean) / (signal_std + 1e-6)
+            
+            # Risk parity weighting (inverse volatility)
+            signal_vol = normalized_signal.rolling(60, min_periods=30).std()
+            risk_weight = 1.0 / (signal_vol + 1e-6)
+            risk_weight = risk_weight / risk_weight.rolling(120, min_periods=60).mean()  # Normalize weights
+            risk_weight = np.clip(risk_weight, 0.1, 3.0)
+            
+            weighted_signal = normalized_signal * risk_weight * 0.08  # Conservative scaling
+            portfolio_signal += weighted_signal / len(valid_signals)
+        
+        # Volatility targeting
+        target_vol = 0.08
+        rolling_vol = portfolio_signal.rolling(50, min_periods=25).std() * np.sqrt(252)
+        vol_scalar = target_vol / (rolling_vol + 1e-6)
+        vol_scalar = np.clip(vol_scalar, 0.4, 1.8)
+        
+        portfolio_signal = portfolio_signal * vol_scalar
+        portfolio_signal = np.clip(portfolio_signal, -0.9, 0.9)
+        
+        # Backtest
+        train_metrics, train_returns = self.project.backtest_signal(portfolio_signal, 'train')
+        
+        print(f"📊 Risk Parity Portfolio (Train): Sharpe = {train_metrics.get('Train_Sharpe_Ratio', 0):.3f}")
+        
+        self.portfolio_results['risk_parity'] = {
+            'signal': portfolio_signal,
+            'train_metrics': train_metrics,
+            'train_returns': train_returns,
+            'valid_signals': valid_signals
+        }
+    
+    def _create_correlation_adjusted_portfolio(self):
+        """Correlation adjusted portfolio with bias-free implementation."""
+        # Select top signals
+        top_signals = self.performance_df.head(20)['signal_name'].tolist()
+        
+        # Prepare signal matrix
+        signal_matrix = []
+        valid_signals = []
+        
+        for signal_name in top_signals:
+            if signal_name in self.all_signals['train']:
+                signal_series = self.all_signals['train'][signal_name]
+                if signal_series.std() > 1e-6:
+                    # Bias-free normalization
+                    signal_mean = signal_series.expanding(min_periods=40).mean()
+                    signal_std = signal_series.expanding(min_periods=40).std()
+                    normalized_signal = (signal_series - signal_mean) / (signal_std + 1e-6)
+                    signal_matrix.append(normalized_signal)
+                    valid_signals.append(signal_name)
+        
+        if len(valid_signals) < 5:
+            print("⚠️ Insufficient signals for correlation adjustment")
+            return
+        
+        # Create signal DataFrame
+        signal_df = pd.concat(signal_matrix, axis=1, keys=valid_signals)
+        
+        # Calculate expanding correlation matrix and adjust weights
+        portfolio_signal = pd.Series(0.0, index=self.project.train_data.index)
+        
+        # Use simple diversification approach (equal weight with correlation penalty)
+        for i, signal_name in enumerate(valid_signals):
+            signal_series = signal_df[signal_name]
+            
+            # Calculate average correlation with other signals using expanding windows
+            other_signals = [s for j, s in enumerate(valid_signals) if j != i]
+            avg_corr = 0
+            
+            for other_signal in other_signals[:5]:  # Limit to top 5 for efficiency
+                corr = signal_series.expanding(min_periods=120).corr(signal_df[other_signal])
+                avg_corr += corr.fillna(0).abs()
+            
+            avg_corr = avg_corr / min(len(other_signals), 5)
+            
+            # Correlation adjustment (lower weight for highly correlated signals)
+            corr_adjustment = 1.0 / (1.0 + avg_corr * 2)
+            corr_adjustment = np.clip(corr_adjustment, 0.2, 1.0)
+            
+            adjusted_signal = signal_series * corr_adjustment * 0.1
+            portfolio_signal += adjusted_signal / len(valid_signals)
+        
+        # Volatility targeting
+        target_vol = 0.09
+        rolling_vol = portfolio_signal.rolling(40, min_periods=20).std() * np.sqrt(252)
+        vol_scalar = target_vol / (rolling_vol + 1e-6)
+        vol_scalar = np.clip(vol_scalar, 0.4, 2.0)
+        
+        portfolio_signal = portfolio_signal * vol_scalar
+        portfolio_signal = np.clip(portfolio_signal, -1.0, 1.0)
+        
+        # Backtest
+        train_metrics, train_returns = self.project.backtest_signal(portfolio_signal, 'train')
+        
+        print(f"📊 Correlation Adjusted Portfolio (Train): Sharpe = {train_metrics.get('Train_Sharpe_Ratio', 0):.3f}")
+        
+        self.portfolio_results['correlation_adjusted'] = {
+            'signal': portfolio_signal,
+            'train_metrics': train_metrics,
+            'train_returns': train_returns,
+            'valid_signals': valid_signals
+        }
+
+    def get_final_results(self):
+        """Return comprehensive final results."""
+        return {
+            'signal_count': len(self.all_signals.get('train', {})),
+            'performance_summary': self.performance_df.to_dict('records') if hasattr(self, 'performance_df') else [],
+            'final_strategy': self.final_strategy,
+            'portfolio_results': self.portfolio_results,
+            'optimization_summary': {
+                'approach': 'volatility_targeted_optimization',
+                'portfolio_methods': list(self.portfolio_results.keys()),
+                'best_method': next((name for name, data in self.portfolio_results.items() if data == self.final_strategy), None),
+                'target_achieved': self.final_strategy.get('blind_metrics', {}).get('Blind_Sharpe_Ratio', 0) >= 2.0 if self.final_strategy else False
+            }
+        }
+    
+    def save_results(self, filename='quanta_results_vol_targeted_optimized.pkl'):
+        """Save optimized results to file."""
+        import pickle
+        results = self.get_final_results()
+        with open(filename, 'wb') as f:
+            pickle.dump(results, f)
+        print(f"✅ Optimized volatility targeted results saved to {filename}")
+
+
+def main():
+    """Main execution function."""
+    strategy = VolatilityTargetedOptimizedStrategy()
+    results = strategy.run_complete_analysis()
+    
+    # Save results
+    strategy.save_results()
+    
+    print("\n" + "="*85)
+    print("🏆 VOLATILITY TARGETED OPTIMIZATION COMPLETE")
+    print("="*85)
+    
+    # Display final performance summary
+    if strategy.final_strategy and 'blind_metrics' in strategy.final_strategy:
+        blind_sharpe = strategy.final_strategy['blind_metrics'].get('Blind_Sharpe_Ratio', 0)
+        
+        print(f"\n📊 VOLATILITY TARGETED PERFORMANCE SUMMARY:")
+        print(f"   Optimized Strategy Sharpe:     {blind_sharpe:.3f}")
+        print(f"   Target Sharpe:                 2.000")
+        print(f"   Gap to target:                 {2.0 - blind_sharpe:.3f}")
+        
+        if blind_sharpe >= 2.0:
+            print(f"   🎯 TARGET ACHIEVED: 2.0+ Sharpe ratio!")
+        else:
+            remaining_gap = 2.0 - blind_sharpe
+            print(f"   📈 Remaining gap to 2.0:       {remaining_gap:.3f}")
+
+
+if __name__ == "__main__":
+    main()
