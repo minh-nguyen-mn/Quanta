@@ -52,7 +52,7 @@ From the project root directory:
 
 ```bash
 python final.py
-
+```
 
 ---
 
