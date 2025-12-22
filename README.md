@@ -32,6 +32,30 @@ The QQQ dataset is split exactly as specified:
 
 ---
 
+## How to Run
+
+### Requirements
+- Python 3.9+
+- Required packages:
+  - `numpy`
+  - `pandas`
+  - `matplotlib`
+  - `seaborn`
+
+The provided `quanta_fellowship_project` module handles all data loading and dataset splits.
+
+---
+
+### Run the Full Backtest
+
+From the project root directory:
+
+```bash
+python final.py
+
+
+---
+
 ## Execution & Lookahead Bias Control
 
 - All indicators are computed using **rolling windows only**.
