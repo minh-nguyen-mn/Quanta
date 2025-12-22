@@ -52,13 +52,17 @@ class QuantaFellowshipProject:
         
         # Load training and validation data (2000-2021)
         train_val_data = pd.read_csv('Quanta Fellowship Train & Validate.csv')
-        train_val_data['Time'] = pd.to_datetime(train_val_data['Time'])
+        # Parse Time robustly: coerce unparsable strings to NaT and drop them
+        train_val_data['Time'] = pd.to_datetime(train_val_data['Time'], errors='coerce')
+        train_val_data = train_val_data.dropna(subset=['Time']).copy()
         train_val_data.set_index('Time', inplace=True)
         train_val_data.sort_index(inplace=True)
         
         # Load blind out-of-sample data (2022-2025)
         blind_data = pd.read_csv('QQQ Fellowship Blind Out of Sample.csv')
-        blind_data['Time'] = pd.to_datetime(blind_data['Time'])
+        # Parse Time robustly: coerce unparsable strings to NaT and drop them
+        blind_data['Time'] = pd.to_datetime(blind_data['Time'], errors='coerce')
+        blind_data = blind_data.dropna(subset=['Time']).copy()
         blind_data.set_index('Time', inplace=True)
         blind_data.sort_index(inplace=True)
         
@@ -72,7 +76,8 @@ class QuantaFellowshipProject:
         # Split train/validation data
         self.train_data = train_val_data.loc[self.TRAIN_START:self.TRAIN_END].copy()
         self.validation_data = train_val_data.loc[self.VALIDATION_START:self.VALIDATION_END].copy()
-        self.blind_data = blind_data.copy()
+        # Filter blind data to start from BLIND_START (2022-01-01)
+        self.blind_data = blind_data.loc[self.BLIND_START:].copy()
         
         # Rename 'Latest' to 'Close' for consistency
         for df in [self.train_data, self.validation_data, self.blind_data]:
